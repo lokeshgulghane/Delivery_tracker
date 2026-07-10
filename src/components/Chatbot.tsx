@@ -9,7 +9,7 @@ export default function Chatbot() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   
   const { messages, sendMessage, status } = useChat({
-    api: '/api/chat',
+    
     onError: (err) => {
       const msg = (err?.message || '').toLowerCase()
       if (msg.includes('429') || msg.includes('quota') || msg.includes('exhausted') || msg.includes('rate')) {
