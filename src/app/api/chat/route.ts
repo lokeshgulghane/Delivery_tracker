@@ -10,14 +10,16 @@ export const maxDuration = 60
 // Models to try in order — fastest/cheapest first, most capable last
 // We test all and use the first that doesn't throw a quota/auth error
 const GEMINI_MODEL_FALLBACKS = [
-  'gemini-2.5-flash',
+    'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
   'gemini-2.0-flash-lite',
   'gemini-2.0-flash',
   'gemini-1.5-flash-8b',
   'gemini-1.5-flash',
+  'gemini-1.5-flash-lite',
   'gemini-1.5-pro',
   'gemini-pro',
+
 ]
 
 function isQuotaOrRateError(err: unknown): boolean {
@@ -163,7 +165,7 @@ If you cannot help, suggest emailing support@deliverytracker.app.`
       await generateText({
         model,
         prompt: 'Hello',
-        maxTokens: 1,
+      
       })
 
       console.log(`[chat] Model ${modelId} is available, starting streamText...`)
