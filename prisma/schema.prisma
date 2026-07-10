@@ -1,0 +1,251 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  CUSTOMER
+  AGENT
+  ADMIN
+}
+
+enum OrderType {
+  B2B
+  B2C
+}
+
+enum PaymentType {
+  PREPAID
+  COD
+}
+
+enum OrderStatus {
+  PENDING
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RESCHEDULED
+}
+
+enum VehicleType {
+  BIKE
+  CAR
+  VAN
+  TRUCK
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(CUSTOMER)
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  agentProfile   AgentProfile?
+  ordersAsCustomer Order[]         @relation("CustomerOrders")
+  ordersAsAgent   Order[]         @relation("AgentOrders")
+  trackingActions TrackingEvent[]
+  notifications   Notification[]
+  ordersCreatedByAdmin Order[]    @relation("AdminCreatedOrders")
+
+  @@map("users")
+}
+
+model AgentProfile {
+  id            String      @id @default(cuid())
+  userId        String      @unique
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentLat    Float?
+  currentLng    Float?
+  currentZoneId String?
+  currentZone   Zone?       @relation(fields: [currentZoneId], references: [id])
+  isAvailable   Boolean     @default(true)
+  vehicleType   VehicleType @default(BIKE)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@map("agent_profiles")
+}
+
+model Zone {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  geoJsonBoundary  Json     // GeoJSON Polygon: { type: "Polygon", coordinates: [...] }
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  areas            Area[]
+  agentsInZone     AgentProfile[]
+  pickupOrders     Order[]         @relation("PickupZone")
+  dropOrders       Order[]         @relation("DropZone")
+  intraRateCards   RateCard[]      @relation("IntraZoneRates")
+  fromRateCards    RateCard[]      @relation("InterFromZone")
+  toRateCards      RateCard[]      @relation("InterToZone")
+
+  @@map("zones")
+}
+
+model Area {
+  id        String   @id @default(cuid())
+  name      String
+  pincode   String
+  zoneId    String
+  zone      Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([zoneId, pincode])
+  @@map("areas")
+}
+
+model RateCard {
+  id          String    @id @default(cuid())
+  name        String
+  orderType   OrderType
+  isIntraZone Boolean   @default(true)
+
+  // For inter-zone: fromZoneId + toZoneId define the corridor
+  // For intra-zone: fromZoneId references the zone (toZoneId is null)
+  fromZoneId  String?
+  fromZone    Zone?     @relation("InterFromZone", fields: [fromZoneId], references: [id])
+  toZoneId    String?
+  toZone      Zone?     @relation("InterToZone", fields: [toZoneId], references: [id])
+  intraZoneId String?
+  intraZone   Zone?     @relation("IntraZoneRates", fields: [intraZoneId], references: [id])
+
+  baseRate    Float     // rate per kg (in ₹)
+  minCharge   Float     // minimum charge (in ₹)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("rate_cards")
+}
+
+model CodSurcharge {
+  id              String    @id @default(cuid())
+  orderType       OrderType @unique
+  surchargeAmount Float     // in ₹
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("cod_surcharges")
+}
+
+model Order {
+  id             String      @id @default(cuid())
+  
+  // Parties
+  customerId     String
+  customer       User        @relation("CustomerOrders", fields: [customerId], references: [id])
+  agentId        String?
+  agent          User?       @relation("AgentOrders", fields: [agentId], references: [id])
+  createdByAdmin String?
+  adminCreator   User?       @relation("AdminCreatedOrders", fields: [createdByAdmin], references: [id])
+
+  // Pickup
+  pickupAddress  String
+  pickupLat      Float
+  pickupLng      Float
+  pickupZoneId   String?
+  pickupZone     Zone?       @relation("PickupZone", fields: [pickupZoneId], references: [id])
+
+  // Drop
+  dropAddress    String
+  dropLat        Float
+  dropLng        Float
+  dropZoneId     String?
+  dropZone       Zone?       @relation("DropZone", fields: [dropZoneId], references: [id])
+
+  // Package
+  packageLength   Float       // cm
+  packageBreadth  Float       // cm
+  packageHeight   Float       // cm
+  actualWeight    Float       // kg
+  volumetricWeight Float      // (L×B×H)/5000 kg
+  billedWeight    Float       // max(actualWeight, volumetricWeight)
+
+  // Order type & payment
+  orderType      OrderType
+  paymentType    PaymentType
+
+  // Charges (all stored for audit)
+  rateCardId     String?
+  baseCharge     Float       // billedWeight × baseRate
+  codSurcharge   Float       @default(0)
+  totalCharge    Float
+
+  // Status
+  status         OrderStatus @default(PENDING)
+  scheduledDate  DateTime?   // for rescheduled orders
+
+  // COD collection
+  codCollected   Boolean     @default(false)
+  codAmount      Float?
+
+  // Notes
+  notes          String?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  trackingEvents TrackingEvent[]
+  notifications  Notification[]
+
+  @@map("orders")
+}
+
+// IMMUTABLE — only INSERT allowed, never UPDATE or DELETE
+model TrackingEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  notes     String?
+  actorId   String?
+  actor     User?       @relation(fields: [actorId], references: [id])
+  actorRole Role?
+  timestamp DateTime    @default(now())
+
+  @@map("tracking_events")
+}
+
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderId   String?
+  order     Order?             @relation(fields: [orderId], references: [id])
+  type      String             @default("EMAIL") // EMAIL | SMS
+  subject   String
+  message   String
+  status    NotificationStatus @default(PENDING)
+  sentAt    DateTime?
+  createdAt DateTime           @default(now())
+
+  @@map("notifications")
+}
