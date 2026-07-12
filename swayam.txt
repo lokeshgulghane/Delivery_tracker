@@ -7,3 +7,9 @@ RESEND_FROM_EMAIL="onboarding@resend.dev"
 RESEND_ADMIN_EMAIL="admin@deliverytracker.app"
 RESEND_FROM_EMAIL="onboarding@resend.dev"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
+  SMTP_HOST=smtp.gmail.com
+  SMTP_PORT=587
+  SMTP_SECURE=false
+  SMTP_USER=lokeshgulghane1005@gmail.com
+  SMTP_PASS=imzu vmte fyrf brry
+

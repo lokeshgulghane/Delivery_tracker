@@ -124,12 +124,19 @@ export default function Chatbot() {
             {/* Welcome screen */}
             {messages.length === 0 && (
               <div className="text-center py-6">
-                <div className="text-3xl mb-2">👋</div>
-                <p className="text-sm text-gold-muted mb-4">
-                  Hi! I can help you track orders, explain charges, and answer delivery questions.
+                <div className="text-3xl mb-2">🤖</div>
+                <p className="text-sm font-semibold text-gold-primary mb-1">Hi, I'm DeliveryBot!</p>
+                <p className="text-xs text-gold-muted mb-4">
+                  I can place orders, track deliveries, show charges, and reschedule — just ask!
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center">
-                  {['Show my orders', 'Track my order', 'Why this charge?', 'What is out for delivery?'].map((q) => (
+                  {[
+                    '📦 Place a new order',
+                    '🔍 Track my order',
+                    '📋 Show my orders',
+                    '💰 Check charges',
+                    '📅 Reschedule delivery',
+                  ].map((q) => (
                     <button
                       key={q}
                       onClick={() => quickSend(q)}
