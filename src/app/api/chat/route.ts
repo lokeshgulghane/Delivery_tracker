@@ -36,16 +36,37 @@ function buildModels(): LanguageModel[] {
   return models
 }
 
+/**
+ * Safely extract a human-readable string from ANY error type.
+ * Handles: Error | { message } | { error } | { statusText } | plain objects | strings.
+ */
+function extractErrorMessage(err: unknown): string {
+  if (err == null) return 'Unknown error'
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    if (typeof e.message === 'string') return e.message
+    if (typeof e.error === 'string') return e.error
+    if (typeof e.statusText === 'string') return e.statusText
+    if (typeof e.cause === 'string') return e.cause
+    // Last resort: JSON so we at least see something useful
+    try { return JSON.stringify(e) } catch { /* ignore */ }
+  }
+  return String(err)
+}
+
 function isQuotaError(err: unknown): boolean {
-  const msg = String(err instanceof Error ? err.message : err)
+  const msg = extractErrorMessage(err).toLowerCase()
   return (
     msg.includes('429') ||
     msg.includes('quota') ||
-    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('resource_exhausted') ||
     msg.includes('rate_limit') ||
     msg.includes('rate limit') ||
-    msg.includes('Too Many Requests') ||
-    msg.includes('tokens per minute')
+    msg.includes('too many requests') ||
+    msg.includes('tokens per minute') ||
+    msg.includes('requests per minute')
   )
 }
 
@@ -433,8 +454,12 @@ FORMAT:
 
       return result.toUIMessageStreamResponse({
         onError: (error) => {
+          const msg = extractErrorMessage(error)
+          console.error(`[chat] Stream error (${modelName}):`, msg)
           if (isQuotaError(error)) return '⚠️ Rate limit hit. Please wait 30 seconds and try again.'
-          return `⚠️ AI error: ${error instanceof Error ? error.message : String(error)}`
+          if (msg.includes('authentication') || msg.includes('API key') || msg.includes('invalid key'))
+            return '⚠️ AI API key is invalid or expired. Please contact the administrator.'
+          return `⚠️ AI error: ${msg}`
         },
       })
     } catch (err) {
