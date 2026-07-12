@@ -1,32 +1,43 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useChat } from '@ai-sdk/react'
+
+// Extract visible text from an AI SDK v7 message
+function getMessageText(m: any): string {
+  if (Array.isArray(m?.parts) && m.parts.length > 0) {
+    return m.parts
+      .filter((p: any) => p.type === 'text')
+      .map((p: any) => (p.text as string) || '')
+      .join('')
+      .trim()
+  }
+  if (typeof m?.content === 'string') return m.content.trim()
+  return ''
+}
 
 export default function Chatbot() {
   const [open, setOpen] = useState(false)
+  const [input, setInput] = useState('')
+  const [retryCount, setRetryCount] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const prevStatusRef = useRef<string>('ready')
+  const autoRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { messages, sendMessage, status, setMessages, error } = useChat({
     api: '/api/chat',
     onError: (err) => {
-      // useChat already adds errors to the messages list via the stream,
-      // but in case of network-level failures we log them
-      console.error('[Chatbot] error:', err)
+      console.error('[Chatbot] network error:', err)
     },
   })
 
   const isLoading = status === 'submitted' || status === 'streaming'
 
-  // ── Persist chat history ──────────────────────────────────────────────────
+  // ── Persist history in localStorage ──────────────────────────────────────
   useEffect(() => {
     const saved = localStorage.getItem('chatbot_messages')
     if (saved) {
-      try {
-        setMessages(JSON.parse(saved))
-      } catch {
-        // ignore corrupt data
-      }
+      try { setMessages(JSON.parse(saved)) } catch { /* ignore */ }
     }
   }, [setMessages])
 
@@ -41,44 +52,58 @@ export default function Chatbot() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading, error])
 
-  const clearChat = () => {
+  // ── Auto-retry when stream ends with no assistant text ────────────────────
+  // Root cause: Llama/Groq sometimes calls tools but forgets to write the reply.
+  // Fix: detect silent completion → automatically nudge the model to respond.
+  useEffect(() => {
+    if (prevStatusRef.current !== 'ready' && status === 'ready') {
+      // Stream just finished — check if the last assistant message has text
+      const lastMsg = messages[messages.length - 1]
+      const lastText = lastMsg ? getMessageText(lastMsg) : ''
+      const lastIsAssistant = lastMsg?.role === 'assistant'
+
+      if (lastIsAssistant && !lastText && retryCount < 2) {
+        // Silent response — auto-nudge after a short delay
+        console.warn('[Chatbot] Empty assistant response detected, auto-retrying…')
+        autoRetryTimerRef.current = setTimeout(() => {
+          setRetryCount((c) => c + 1)
+          sendMessage({ text: '__retry_summarise__' }) // special token caught by system prompt
+        }, 600)
+      } else {
+        // Good response — reset retry counter
+        setRetryCount(0)
+      }
+    }
+    prevStatusRef.current = status
+  }, [status]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current) }, [])
+
+  const clearChat = useCallback(() => {
     setMessages([])
     localStorage.removeItem('chatbot_messages')
-  }
-
-  const [input, setInput] = useState('')
+    setRetryCount(0)
+  }, [setMessages])
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const text = input.trim()
     if (!text || isLoading) return
     setInput('')
+    setRetryCount(0)
     await sendMessage({ text })
   }
 
   const quickSend = async (text: string) => {
     if (isLoading) return
+    setRetryCount(0)
     await sendMessage({ text })
-  }
-
-  // ── Extract visible text from a message (AI SDK v7) ───────────────────────
-  const getMessageText = (m: any): string => {
-    // v7 messages have parts[]
-    if (Array.isArray(m.parts) && m.parts.length > 0) {
-      return m.parts
-        .filter((p: any) => p.type === 'text')
-        .map((p: any) => p.text as string)
-        .join('')
-        .trim()
-    }
-    // fallback for v6 / plain content
-    if (typeof m.content === 'string') return m.content.trim()
-    return ''
   }
 
   return (
     <div className="chatbot-container">
-      {/* ── Chat Window ─────────────────────────────────────────────────── */}
+      {/* ── Chat Window ──────────────────────────────────────────────── */}
       {open && (
         <div className="chat-window animate-fade-in">
           {/* Header */}
@@ -89,9 +114,13 @@ export default function Chatbot() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-gold-primary">DeliveryBot</p>
-                <p className="text-xs text-gold-muted flex items-center gap-1">
-                  <span className={`w-1.5 h-1.5 rounded-full ${isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`} />
-                  {isLoading ? 'Thinking…' : 'Powered by Gemini AI'}
+                <p className="text-xs text-gold-muted flex items-center gap-1.5">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                      isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'
+                    }`}
+                  />
+                  {isLoading ? 'Working on it…' : 'Powered by Groq AI'}
                 </p>
               </div>
             </div>
@@ -99,7 +128,7 @@ export default function Chatbot() {
               {messages.length > 0 && (
                 <button
                   onClick={clearChat}
-                  className="text-gold-muted hover:text-red-400 transition-colors p-1"
+                  className="text-gold-muted hover:text-red-400 transition-colors p-1 text-base"
                   title="Clear chat"
                   aria-label="Clear chat history"
                 >
@@ -121,7 +150,7 @@ export default function Chatbot() {
             className="flex-1 overflow-y-auto p-4 space-y-3 scroll-smooth"
             style={{ maxHeight: '340px', minHeight: '200px' }}
           >
-            {/* Welcome screen */}
+            {/* Welcome */}
             {messages.length === 0 && (
               <div className="text-center py-6">
                 <div className="text-3xl mb-2">🤖</div>
@@ -150,18 +179,22 @@ export default function Chatbot() {
               </div>
             )}
 
-            {/* Message list */}
+            {/* Render messages */}
             {messages.map((m) => {
               const text = getMessageText(m)
               const isUser = m.role === 'user'
 
-              // Skip tool-call-only assistant messages that have no text
+              // Hide retry trigger messages from the user
+              if (isUser && text === '__retry_summarise__') return null
+              // Hide tool-call-only assistant messages (no visible text)
               if (!isUser && !text) return null
 
               return (
                 <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                   <div
-                    className={`chat-message ${m.role} ${text.startsWith('⚠️') ? 'border border-red-500/40 bg-red-500/10 text-red-300' : ''}`}
+                    className={`chat-message ${m.role} ${
+                      text.startsWith('⚠️') ? 'border border-red-500/40 bg-red-500/10 text-red-300' : ''
+                    }`}
                     style={{ whiteSpace: 'pre-wrap', maxWidth: '85%' }}
                   >
                     {text}
@@ -170,16 +203,19 @@ export default function Chatbot() {
               )
             })}
 
-            {/* Network-level error (e.g. fetch failure) */}
-            {error && (
+            {/* Network-level error */}
+            {error && !isLoading && (
               <div className="flex justify-start">
-                <div className="chat-message assistant border border-red-500/40 bg-red-500/10 text-red-300" style={{ maxWidth: '85%' }}>
+                <div
+                  className="chat-message assistant border border-red-500/40 bg-red-500/10 text-red-300"
+                  style={{ maxWidth: '85%' }}
+                >
                   ⚠️ {error.message || 'Connection error. Please check your internet and try again.'}
                 </div>
               </div>
             )}
 
-            {/* Loading indicator — only show if no streaming text yet */}
+            {/* Typing / loading dots */}
             {isLoading && (() => {
               const last = messages[messages.length - 1]
               const lastText = last ? getMessageText(last) : ''
@@ -205,7 +241,7 @@ export default function Chatbot() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={isLoading ? 'Waiting for response…' : 'Ask about your order…'}
+              placeholder={isLoading ? 'Working on it…' : 'Ask anything…'}
               className="input text-sm py-2"
               disabled={isLoading}
               aria-label="Chat message input"
@@ -213,7 +249,7 @@ export default function Chatbot() {
             <button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="btn-primary px-4 py-2 text-sm shrink-0 flex items-center justify-center"
+              className="btn-primary px-4 py-2 text-sm shrink-0 flex items-center justify-center min-w-[40px]"
               aria-label="Send message"
             >
               {isLoading ? (
@@ -226,7 +262,7 @@ export default function Chatbot() {
         </div>
       )}
 
-      {/* ── Toggle Button ────────────────────────────────────────────────── */}
+      {/* ── Toggle Button ─────────────────────────────────────────────── */}
       <button
         onClick={() => setOpen((v) => !v)}
         className="chat-bubble"
