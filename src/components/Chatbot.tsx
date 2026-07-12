@@ -8,8 +8,7 @@ export default function Chatbot() {
   const [input, setInput] = useState('')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   
-  const { messages, sendMessage, status } = useChat({
-    
+  const { messages, sendMessage, status, setMessages } = useChat({
     onError: (err) => {
       const msg = (err?.message || '').toLowerCase()
       if (msg.includes('429') || msg.includes('quota') || msg.includes('exhausted') || msg.includes('rate')) {
@@ -21,8 +20,26 @@ export default function Chatbot() {
   })
 
   const isLoading = status === 'submitted' || status === 'streaming'
-
   const messagesContainerRef = useRef<HTMLDivElement>(null)
+
+  // Load chat history from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('chatbot_messages')
+    if (saved) {
+      try {
+        setMessages(JSON.parse(saved))
+      } catch (e) {
+        console.error('Failed to load chat history:', e)
+      }
+    }
+  }, [setMessages])
+
+  // Save chat history to localStorage on changes
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem('chatbot_messages', JSON.stringify(messages))
+    }
+  }, [messages])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -30,6 +47,12 @@ export default function Chatbot() {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
     }
   }, [messages, errorMsg, isLoading])
+
+  const onClearChat = () => {
+    setMessages([])
+    localStorage.removeItem('chatbot_messages')
+    setErrorMsg(null)
+  }
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,13 +79,25 @@ export default function Chatbot() {
                 <p className="text-xs text-gold-muted">Powered by Gemini AI</p>
               </div>
             </div>
-            <button
-              onClick={() => setOpen(false)}
-              className="text-gold-muted hover:text-gold-primary transition-colors"
-              aria-label="Close chat"
-            >
-              ✕
-            </button>
+            <div className="flex items-center gap-2">
+              {messages.length > 0 && (
+                <button
+                  onClick={onClearChat}
+                  className="text-gold-muted hover:text-red-400 transition-colors p-1"
+                  title="Clear Chat"
+                  aria-label="Clear chat history"
+                >
+                  🗑️
+                </button>
+              )}
+              <button
+                onClick={() => setOpen(false)}
+                className="text-gold-muted hover:text-gold-primary transition-colors p-1"
+                aria-label="Close chat"
+              >
+                ✕
+              </button>
+            </div>
           </div>
 
           {/* Messages */}

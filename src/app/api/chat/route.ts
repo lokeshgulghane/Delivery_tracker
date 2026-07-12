@@ -10,16 +10,8 @@ export const maxDuration = 60
 // Models to try in order — fastest/cheapest first, most capable last
 // We test all and use the first that doesn't throw a quota/auth error
 const GEMINI_MODEL_FALLBACKS = [
-    'gemini-2.5-flash',
+  'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
-  'gemini-2.0-flash-lite',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-lite',
-  'gemini-1.5-pro',
-  'gemini-pro',
-
 ]
 
 function isQuotaOrRateError(err: unknown): boolean {
@@ -43,12 +35,25 @@ export async function POST(request: Request) {
   // ai v7: useChat sends UIMessages (with parts arrays). Convert to model messages.
   const modelMessages = await convertToModelMessages(messages)
 
-  const systemPrompt = `You are a helpful customer support assistant for DeliveryTracker, a last-mile delivery platform in India.
-You are talking to ${session.user.name} (role: ${session.user.role}).
-You help with: order status, tracking timelines, charge breakdowns, rescheduling failed deliveries, and general FAQs.
-Always be concise, warm, and professional. Use ₹ for currency. Use Indian date formats.
-For order queries, always use the getOrderStatus or getChargeBreakdown tools — never guess.
-If you cannot help, suggest emailing support@deliverytracker.app.`
+  // Token Optimization: Keep only the last 6 messages, but avoid breaking tool-call sequences
+  const sliceMessages = (msgs: any[], maxLimit = 6) => {
+    if (msgs.length <= maxLimit) return msgs
+    let startIndex = msgs.length - maxLimit
+    while (startIndex > 0) {
+      const msg = msgs[startIndex]
+      const isTool = msg.role === 'tool'
+      const hasToolPart = msg.parts?.some((p: any) => p.type === 'tool-result')
+      if (!isTool && !hasToolPart) break
+      startIndex--
+    }
+    return msgs.slice(startIndex)
+  }
+
+  const optimizedMessages = sliceMessages(modelMessages)
+
+  const systemPrompt = `You are the DeliveryTracker assistant. User is ${session.user.name} (${session.user.role}).
+Help with: order status, timelines, rescheduling, charge breakdowns.
+Rules: Be concise and professional. Use ₹ and Indian dates. Use tools for all order queries.`
 
   const tools = {
     getOrderStatus: tool({
@@ -153,7 +158,7 @@ If you cannot help, suggest emailing support@deliverytracker.app.`
     }),
   }
 
-  // Try each model in sequence — verify availability synchronously, skip on quota/rate errors
+  // Try each model in sequence — verify availability synchronously, skip on all errors
   let lastError: unknown = null
 
   for (const modelId of GEMINI_MODEL_FALLBACKS) {
@@ -161,25 +166,20 @@ If you cannot help, suggest emailing support@deliverytracker.app.`
       console.log(`[chat] Testing model availability: ${modelId}`)
       const model = google(modelId) as LanguageModel
       
-      // Perform a minimal synchronous verification call to ensure quota exists
+      // Perform a minimal synchronous verification call to ensure quota exists and model is supported
       await generateText({
         model,
-        prompt: 'Hello',
-      
+        prompt: '.',
+        maxTokens: 1,
       })
 
       console.log(`[chat] Model ${modelId} is available, starting streamText...`)
-      const result = streamText({ model, system: systemPrompt, messages: modelMessages, tools })
+      const result = streamText({ model, system: systemPrompt, messages: optimizedMessages, tools, maxSteps: 5 })
       return result.toUIMessageStreamResponse()
     } catch (err) {
       lastError = err
-      if (isQuotaOrRateError(err)) {
-        console.warn(`[chat] Quota/rate limit exceeded for ${modelId}, trying next model...`)
-        continue // try next model in fallback list
-      }
-      // Non-quota error — bail immediately
-      console.error(`[chat] Non-quota error on ${modelId}:`, err)
-      break
+      console.warn(`[chat] Error on model ${modelId}:`, err)
+      continue // Try the next model in the fallback list regardless of the error type
     }
   }
 

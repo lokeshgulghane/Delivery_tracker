@@ -1,0 +1,7 @@
+DATABASE_URL="postgresql://neondb_owner:npg_XvD4t1dLOlfw@ep-crimson-wind-at12rpf2-pooler.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+NEXTAUTH_SECRET="f6c8d7e9b0a1c2d3e4f5a6b7c8d9e0f1"
+NEXTAUTH_URL="http://localhost:3000"
+GOOGLE_GENERATIVE_AI_API_KEY="AQ.Ab8RN6K5L2sJfqg7KGotKJRK7-GgmOadY6G8c2zdIUpSMfSyMw"
+RESEND_API_KEY="placeholder-resend-key"
+RESEND_FROM_EMAIL="onboarding@resend.dev"
+NEXT_PUBLIC_APP_URL="http://localhost:3000"

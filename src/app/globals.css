@@ -470,3 +470,17 @@ tr:last-child td { border-bottom: none; }
 
 .charge-row:last-child { border-bottom: none; }
 .charge-row.total { font-weight: 700; font-size: 16px; padding-top: 12px; }
+
+/* ── Mobile Responsive Overrides ────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .chatbot-container {
+    bottom: 16px;
+    right: 16px;
+  }
+  .chat-window {
+    width: calc(100vw - 32px);
+    max-height: 80vh;
+    bottom: 68px;
+  }
+}
+

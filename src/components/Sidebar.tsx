@@ -9,6 +9,7 @@ interface SidebarProps {
   items: NavItem[]
   role: 'customer' | 'admin' | 'agent'
   user: { name: string; email: string }
+  onCloseMobile?: () => void
 }
 
 const ROLE_CONFIG = {
@@ -17,20 +18,31 @@ const ROLE_CONFIG = {
   agent:    { label: 'Agent Portal',    icon: '🛵' },
 }
 
-export default function Sidebar({ items, role, user }: SidebarProps) {
+export default function Sidebar({ items, role, user, onCloseMobile }: SidebarProps) {
   const pathname = usePathname()
   const config = ROLE_CONFIG[role]
 
   return (
-    <aside className="w-64 min-h-screen flex flex-col" style={{ background: '#0a0a0a', borderRight: '1px solid rgba(212,160,23,0.15)' }}>
+    <div className="w-64 h-full flex flex-col" style={{ background: '#0a0a0a', borderRight: '1px solid rgba(212,160,23,0.15)' }}>
       {/* Logo */}
       <div className="p-5" style={{ borderBottom: '1px solid rgba(212,160,23,0.12)' }}>
-        <Link href="/" className="flex items-center gap-3 mb-5">
-          <div className="w-9 h-9 rounded-xl gold-gradient flex items-center justify-center text-lg font-bold text-black">
-            🚚
-          </div>
-          <span className="text-lg font-bold gradient-text">DeliveryTracker</span>
-        </Link>
+        <div className="flex items-center justify-between mb-5">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl gold-gradient flex items-center justify-center text-lg font-bold text-black">
+              🚚
+            </div>
+            <span className="text-lg font-bold gradient-text">DeliveryTracker</span>
+          </Link>
+          {onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="lg:hidden p-2 text-gold-muted hover:text-gold-primary transition-colors focus:outline-none"
+              aria-label="Close sidebar"
+            >
+              ✕
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ background: 'rgba(212,160,23,0.08)', border: '1px solid rgba(212,160,23,0.2)' }}>
           <span className="text-sm">{config.icon}</span>
           <span className="text-xs font-semibold text-gold-primary">{config.label}</span>
@@ -66,6 +78,6 @@ export default function Sidebar({ items, role, user }: SidebarProps) {
           <span>Sign Out</span>
         </button>
       </div>
-    </aside>
+    </div>
   )
 }

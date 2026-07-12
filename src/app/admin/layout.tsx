@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
-import Sidebar from '@/components/Sidebar'
+import ResponsiveLayout from '@/components/ResponsiveLayout'
 import Chatbot from '@/components/Chatbot'
 
 const NAV_ITEMS = [
@@ -19,10 +19,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (session.user.role !== 'ADMIN') redirect('/dashboard')
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar items={NAV_ITEMS} role="admin" user={session.user} />
-      <main className="flex-1 overflow-auto">{children}</main>
-      <Chatbot />
-    </div>
+    <ResponsiveLayout
+      items={NAV_ITEMS}
+      role="admin"
+      user={{
+        name: session.user.name || '',
+        email: session.user.email || '',
+      }}
+      chatbot={<Chatbot />}
+    >
+      {children}
+    </ResponsiveLayout>
   )
 }
