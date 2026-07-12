@@ -21,10 +21,10 @@ function buildModels(): LanguageModel[] {
 
   if (process.env.GROQ_API_KEY) {
     const groq = createGroq({ apiKey: process.env.GROQ_API_KEY })
-    // llama-3.3-70b-versatile: best quality + tool calling on Groq free tier
-    models.push(groq('llama-3.3-70b-versatile'))
-    // Smaller fast fallback
+    // llama-3.1-8b-instant: 30,000 TPM limit (5x higher than 70b), very fast and stable
     models.push(groq('llama-3.1-8b-instant'))
+    // llama-3.3-70b-versatile: fallback/higher capacity
+    models.push(groq('llama-3.3-70b-versatile'))
   }
 
   if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
@@ -211,7 +211,7 @@ FORMAT:
             return o
           })
 
-          notifyOrderStatusChange(order.id, OrderStatus.PENDING).catch(console.error)
+          await notifyOrderStatusChange(order.id, OrderStatus.PENDING)
 
           return {
             success: true,
@@ -416,7 +416,7 @@ FORMAT:
             })
           })
 
-          notifyOrderStatusChange(order.id, OrderStatus.RESCHEDULED).catch(console.error)
+          await notifyOrderStatusChange(order.id, OrderStatus.RESCHEDULED)
 
           return {
             success: true,

@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
-import Sidebar from '@/components/Sidebar'
+import ResponsiveLayout from '@/components/ResponsiveLayout'
 import Chatbot from '@/components/Chatbot'
 
 const NAV_ITEMS = [
@@ -16,12 +16,16 @@ export default async function CustomerLayout({ children }: { children: React.Rea
   if (session.user.role === 'AGENT') redirect('/agent')
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar items={NAV_ITEMS} role="customer" user={session.user} />
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
-      <Chatbot />
-    </div>
+    <ResponsiveLayout
+      items={NAV_ITEMS}
+      role="customer"
+      user={{
+        name: session.user.name || '',
+        email: session.user.email || '',
+      }}
+      chatbot={<Chatbot />}
+    >
+      {children}
+    </ResponsiveLayout>
   )
 }

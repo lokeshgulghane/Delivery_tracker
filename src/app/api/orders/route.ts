@@ -160,8 +160,8 @@ export async function POST(request: NextRequest) {
       return newOrder
     })
 
-    // Send notification asynchronously
-    notifyOrderStatusChange(order.id, OrderStatus.PENDING).catch(console.error)
+    // Send notification and await it to prevent Vercel container termination
+    await notifyOrderStatusChange(order.id, OrderStatus.PENDING)
 
     return NextResponse.json(order, { status: 201 })
   } catch (error) {

@@ -78,8 +78,8 @@ export async function PATCH(
     await releaseAgent(order.agentId)
   }
 
-  // Fire-and-forget email notification
-  notifyOrderStatusChange(id, newStatus, notes).catch(console.error)
+  // Send notification and await it to prevent Vercel container termination
+  await notifyOrderStatusChange(id, newStatus, notes)
 
   return NextResponse.json({ success: true, status: newStatus })
 }

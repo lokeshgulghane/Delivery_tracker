@@ -21,6 +21,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         include: { actor: { select: { name: true, role: true } } },
         orderBy: { timestamp: 'asc' },
       },
+      notifications: {
+        orderBy: { createdAt: 'desc' },
+      },
     },
   })
 
@@ -134,26 +137,53 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         <div className="card">
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-6">📍 Tracking Timeline</h2>
           <div>
-            {order.trackingEvents.map((event, idx) => (
-              <div key={event.id} className="timeline-item">
-                <div className={`timeline-dot ${getStatusColor(event.status)}`}>
-                  {getStatusIcon(event.status)}
-                </div>
-                <div className="flex-1 pt-1">
-                  <p className="font-medium text-sm">{event.status.replace(/_/g, ' ')}</p>
-                  {event.notes && <p className="text-xs text-slate-400 mt-0.5">{event.notes}</p>}
-                  <p className="text-xs text-slate-600 mt-1">{formatDate(event.timestamp)}</p>
-                  {event.actor && (
-                    <p className="text-xs text-slate-600">
-                      by {event.actor.name} ({event.actor.role})
-                    </p>
+            {order.trackingEvents.map((event, idx) => {
+              const notif = order.notifications.find(
+                (n) => n.message === `Status updated to ${event.status}`
+              )
+
+              return (
+                <div key={event.id} className="timeline-item">
+                  <div className={`timeline-dot ${getStatusColor(event.status)}`}>
+                    {getStatusIcon(event.status)}
+                  </div>
+                  <div className="flex-1 pt-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{event.status.replace(/_/g, ' ')}</span>
+                      {notif && (
+                        <>
+                          {notif.status === 'SENT' && (
+                            <span className="text-[10px] bg-green-500/10 text-green-400 border border-green-500/25 px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-semibold">
+                              📧 Mail Sent
+                            </span>
+                          )}
+                          {notif.status === 'FAILED' && (
+                            <span className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/25 px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-semibold">
+                              📧 Mail Failed
+                            </span>
+                          )}
+                          {notif.status === 'PENDING' && (
+                            <span className="text-[10px] bg-yellow-500/10 text-yellow-400 border border-yellow-500/25 px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-semibold animate-pulse">
+                              📧 Mail Pending
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {event.notes && <p className="text-xs text-slate-400 mt-0.5">{event.notes}</p>}
+                    <p className="text-xs text-slate-600 mt-1">{formatDate(event.timestamp)}</p>
+                    {event.actor && (
+                      <p className="text-xs text-slate-600">
+                        by {event.actor.name} ({event.actor.role})
+                      </p>
+                    )}
+                  </div>
+                  {idx === order.trackingEvents.length - 1 && (
+                    <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full self-start mt-1">Latest</span>
                   )}
                 </div>
-                {idx === order.trackingEvents.length - 1 && (
-                  <span className="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full self-start mt-1">Latest</span>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {order.scheduledDate && (

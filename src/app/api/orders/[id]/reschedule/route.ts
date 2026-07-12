@@ -52,14 +52,17 @@ export async function POST(
     })
   })
 
-  notifyOrderStatusChange(id, OrderStatus.RESCHEDULED).catch(console.error)
+  await notifyOrderStatusChange(id, OrderStatus.RESCHEDULED)
 
-  // Trigger auto-assign for rescheduled attempt
-  autoAssignAgent(id, order.pickupLat, order.pickupLng, order.pickupZoneId)
-    .then((result) => {
-      if (result.success) notifyOrderStatusChange(id, OrderStatus.ASSIGNED).catch(console.error)
-    })
-    .catch(console.error)
+  // Trigger auto-assign for rescheduled attempt and await it to run properly on Vercel
+  try {
+    const result = await autoAssignAgent(id, order.pickupLat, order.pickupLng, order.pickupZoneId)
+    if (result.success) {
+      await notifyOrderStatusChange(id, OrderStatus.ASSIGNED)
+    }
+  } catch (err) {
+    console.error('Auto-assign failed during reschedule:', err)
+  }
 
   return NextResponse.json({ success: true, scheduledDate: newDate })
 }

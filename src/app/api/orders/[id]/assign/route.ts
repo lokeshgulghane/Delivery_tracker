@@ -53,13 +53,13 @@ export async function POST(
         },
       })
     })
-    notifyOrderStatusChange(id, OrderStatus.ASSIGNED).catch(console.error)
+    await notifyOrderStatusChange(id, OrderStatus.ASSIGNED)
     return NextResponse.json({ success: true, method: 'manual', agentId })
   } else {
     // Auto-assignment
     const result = await autoAssignAgent(id, order.pickupLat, order.pickupLng, order.pickupZoneId)
     if (!result.success) return NextResponse.json({ error: result.error }, { status: 400 })
-    notifyOrderStatusChange(id, OrderStatus.ASSIGNED).catch(console.error)
+    await notifyOrderStatusChange(id, OrderStatus.ASSIGNED)
     const { success: _ok, ...rest } = result
     return NextResponse.json({ success: true, method: 'auto', ...rest })
   }
