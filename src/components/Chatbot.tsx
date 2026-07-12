@@ -5,67 +5,80 @@ import { useChat } from '@ai-sdk/react'
 
 export default function Chatbot() {
   const [open, setOpen] = useState(false)
-  const [input, setInput] = useState('')
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const { messages, sendMessage, status, setMessages, error } = useChat({
+    api: '/api/chat',
     onError: (err) => {
-      const msg = (err?.message || '').toLowerCase()
-      if (msg.includes('429') || msg.includes('quota') || msg.includes('exhausted') || msg.includes('rate')) {
-        setErrorMsg('⚠️ AI quota exceeded. Please wait 1 minute and try again.')
-      } else {
-        setErrorMsg('⚠️ AI service unavailable. Please try again shortly.')
-      }
+      // useChat already adds errors to the messages list via the stream,
+      // but in case of network-level failures we log them
+      console.error('[Chatbot] error:', err)
     },
   })
 
   const isLoading = status === 'submitted' || status === 'streaming'
-  const messagesContainerRef = useRef<HTMLDivElement>(null)
 
-  // Load chat history from localStorage on mount
+  // ── Persist chat history ──────────────────────────────────────────────────
   useEffect(() => {
     const saved = localStorage.getItem('chatbot_messages')
     if (saved) {
       try {
         setMessages(JSON.parse(saved))
-      } catch (e) {
-        console.error('Failed to load chat history:', e)
+      } catch {
+        // ignore corrupt data
       }
     }
   }, [setMessages])
 
-  // Save chat history to localStorage on changes
   useEffect(() => {
     if (messages.length > 0) {
       localStorage.setItem('chatbot_messages', JSON.stringify(messages))
     }
   }, [messages])
 
-  // Auto-scroll to bottom
+  // ── Auto-scroll ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
-    }
-  }, [messages, errorMsg, isLoading])
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isLoading, error])
 
-  const onClearChat = () => {
+  const clearChat = () => {
     setMessages([])
     localStorage.removeItem('chatbot_messages')
-    setErrorMsg(null)
   }
+
+  const [input, setInput] = useState('')
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
-    setErrorMsg(null)
-    const messageText = input
+    const text = input.trim()
+    if (!text || isLoading) return
     setInput('')
-    await sendMessage({ text: messageText })
+    await sendMessage({ text })
+  }
+
+  const quickSend = async (text: string) => {
+    if (isLoading) return
+    await sendMessage({ text })
+  }
+
+  // ── Extract visible text from a message (AI SDK v7) ───────────────────────
+  const getMessageText = (m: any): string => {
+    // v7 messages have parts[]
+    if (Array.isArray(m.parts) && m.parts.length > 0) {
+      return m.parts
+        .filter((p: any) => p.type === 'text')
+        .map((p: any) => p.text as string)
+        .join('')
+        .trim()
+    }
+    // fallback for v6 / plain content
+    if (typeof m.content === 'string') return m.content.trim()
+    return ''
   }
 
   return (
     <div className="chatbot-container">
-      {/* Chat Window */}
+      {/* ── Chat Window ─────────────────────────────────────────────────── */}
       {open && (
         <div className="chat-window animate-fade-in">
           {/* Header */}
@@ -76,15 +89,18 @@ export default function Chatbot() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-gold-primary">DeliveryBot</p>
-                <p className="text-xs text-gold-muted">Powered by Gemini AI</p>
+                <p className="text-xs text-gold-muted flex items-center gap-1">
+                  <span className={`w-1.5 h-1.5 rounded-full ${isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-green-400'}`} />
+                  {isLoading ? 'Thinking…' : 'Powered by Gemini AI'}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               {messages.length > 0 && (
                 <button
-                  onClick={onClearChat}
+                  onClick={clearChat}
                   className="text-gold-muted hover:text-red-400 transition-colors p-1"
-                  title="Clear Chat"
+                  title="Clear chat"
                   aria-label="Clear chat history"
                 >
                   🗑️
@@ -101,25 +117,24 @@ export default function Chatbot() {
           </div>
 
           {/* Messages */}
-          <div 
-            ref={messagesContainerRef}
-            className="flex-1 overflow-y-auto p-4 space-y-3 scroll-smooth" 
-            style={{ maxHeight: '320px' }}
+          <div
+            className="flex-1 overflow-y-auto p-4 space-y-3 scroll-smooth"
+            style={{ maxHeight: '340px', minHeight: '200px' }}
           >
-            {messages.length === 0 && !errorMsg && (
+            {/* Welcome screen */}
+            {messages.length === 0 && (
               <div className="text-center py-6">
                 <div className="text-3xl mb-2">👋</div>
-                <p className="text-sm text-gold-muted">Hi! I can help you with order tracking, charge breakdowns, and delivery questions.</p>
-                <div className="flex flex-wrap gap-2 justify-center mt-3">
-                  {['Track my order', 'Why this charge?', 'Reschedule delivery'].map((q) => (
+                <p className="text-sm text-gold-muted mb-4">
+                  Hi! I can help you track orders, explain charges, and answer delivery questions.
+                </p>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {['Show my orders', 'Track my order', 'Why this charge?', 'What is out for delivery?'].map((q) => (
                     <button
                       key={q}
-                      onClick={async () => {
-                        if (isLoading) return
-                        setErrorMsg(null)
-                        await sendMessage({ text: q })
-                      }}
-                      className="text-xs px-3 py-1.5 rounded-full border border-gold-border text-gold-secondary hover:bg-gold-subtle transition-colors"
+                      onClick={() => quickSend(q)}
+                      disabled={isLoading}
+                      className="text-xs px-3 py-1.5 rounded-full border border-gold-border text-gold-secondary hover:bg-gold-subtle transition-colors disabled:opacity-50"
                     >
                       {q}
                     </button>
@@ -128,38 +143,54 @@ export default function Chatbot() {
               </div>
             )}
 
+            {/* Message list */}
             {messages.map((m) => {
-              // Extract text content from parts if present
-              let displayContent = (m as any).content || ''
-              if (m.parts && m.parts.length > 0) {
-                displayContent = m.parts
-                  .map((p) => (p.type === 'text' ? p.text : ''))
-                  .join('')
-              }
+              const text = getMessageText(m)
+              const isUser = m.role === 'user'
+
+              // Skip tool-call-only assistant messages that have no text
+              if (!isUser && !text) return null
 
               return (
-                <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`chat-message ${m.role}`}>
-                    {displayContent || (isLoading && m.role === 'assistant' ? (
-                      <span className="flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gold-primary animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <span className="w-1.5 h-1.5 rounded-full bg-gold-primary animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <span className="w-1.5 h-1.5 rounded-full bg-gold-primary animate-bounce" style={{ animationDelay: '300ms' }} />
-                      </span>
-                    ) : null)}
+                <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`chat-message ${m.role} ${text.startsWith('⚠️') ? 'border border-red-500/40 bg-red-500/10 text-red-300' : ''}`}
+                    style={{ whiteSpace: 'pre-wrap', maxWidth: '85%' }}
+                  >
+                    {text}
                   </div>
                 </div>
               )
             })}
 
-            {/* Error message rendered at the bottom in conversational order */}
-            {errorMsg && (
+            {/* Network-level error (e.g. fetch failure) */}
+            {error && (
               <div className="flex justify-start">
-                <div className="chat-message assistant text-red-400 border border-red-500/30 bg-red-500/10">
-                  {errorMsg}
+                <div className="chat-message assistant border border-red-500/40 bg-red-500/10 text-red-300" style={{ maxWidth: '85%' }}>
+                  ⚠️ {error.message || 'Connection error. Please check your internet and try again.'}
                 </div>
               </div>
             )}
+
+            {/* Loading indicator — only show if no streaming text yet */}
+            {isLoading && (() => {
+              const last = messages[messages.length - 1]
+              const lastText = last ? getMessageText(last) : ''
+              const showDots = !lastText || last?.role === 'user'
+              return showDots ? (
+                <div className="flex justify-start">
+                  <div className="chat-message assistant">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-gold-primary animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 rounded-full bg-gold-primary animate-bounce" style={{ animationDelay: '160ms' }} />
+                      <span className="w-2 h-2 rounded-full bg-gold-primary animate-bounce" style={{ animationDelay: '320ms' }} />
+                    </span>
+                  </div>
+                </div>
+              ) : null
+            })()}
+
+            <div ref={messagesEndRef} />
           </div>
 
           {/* Input */}
@@ -167,29 +198,38 @@ export default function Chatbot() {
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about your order..."
+              placeholder={isLoading ? 'Waiting for response…' : 'Ask about your order…'}
               className="input text-sm py-2"
               disabled={isLoading}
+              aria-label="Chat message input"
             />
             <button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="btn-primary px-3 py-2 text-sm shrink-0"
+              className="btn-primary px-4 py-2 text-sm shrink-0 flex items-center justify-center"
               aria-label="Send message"
             >
-              {isLoading ? '⏳' : '↑'}
+              {isLoading ? (
+                <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+              ) : (
+                '↑'
+              )}
             </button>
           </form>
         </div>
       )}
 
-      {/* Toggle Button */}
+      {/* ── Toggle Button ────────────────────────────────────────────────── */}
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen((v) => !v)}
         className="chat-bubble"
         aria-label={open ? 'Close chat' : 'Open AI chat support'}
       >
-        <span className="text-2xl">{open ? '✕' : '💬'}</span>
+        {isLoading && open ? (
+          <span className="w-6 h-6 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+        ) : (
+          <span className="text-2xl">{open ? '✕' : '💬'}</span>
+        )}
       </button>
     </div>
   )

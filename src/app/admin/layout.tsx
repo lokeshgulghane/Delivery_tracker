@@ -1,7 +1,6 @@
 import { auth } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import ResponsiveLayout from '@/components/ResponsiveLayout'
-import Chatbot from '@/components/Chatbot'
 
 const NAV_ITEMS = [
   { href: '/admin', icon: '📊', label: 'Dashboard' },
@@ -26,7 +25,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         name: session.user.name || '',
         email: session.user.email || '',
       }}
-      chatbot={<Chatbot />}
     >
       {children}
     </ResponsiveLayout>

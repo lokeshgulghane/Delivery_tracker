@@ -1,14 +1,31 @@
-import { Resend } from 'resend'
+import nodemailer from 'nodemailer'
 import { prisma } from './prisma'
 import { OrderStatus } from '@prisma/client'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
-// Use Resend's default onboarding address OR a verified custom domain address
-const FROM = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev'
+// ── SMTP Transporter ─────────────────────────────────────────────────────────
+// Lazy-initialised once so the connection pool is reused across requests
+let _transporter: nodemailer.Transporter | null = null
 
+function getTransporter(): nodemailer.Transporter {
+  if (_transporter) return _transporter
+
+  _transporter = nodemailer.createTransport({
+    host:   process.env.SMTP_HOST,
+    port:   Number(process.env.SMTP_PORT || 587),
+    secure: process.env.SMTP_SECURE === 'true', // true → port 465 (SSL), false → STARTTLS
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  })
+
+  return _transporter
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 export interface NotificationPayload {
   to: string
-  customerId: string        // required: User.id of the customer
+  customerId: string
   customerName: string
   orderId: string
   status: OrderStatus
@@ -20,15 +37,16 @@ export interface NotificationPayload {
   dropAddress?: string
 }
 
+// ── Subject lines ─────────────────────────────────────────────────────────────
 const STATUS_SUBJECTS: Record<OrderStatus, string> = {
-  PENDING:           '📦 Order Placed — DeliveryTracker',
-  ASSIGNED:          '🚴 Delivery Agent Assigned — DeliveryTracker',
-  PICKED_UP:         '✅ Package Picked Up — DeliveryTracker',
-  IN_TRANSIT:        '🚚 Package In Transit — DeliveryTracker',
-  OUT_FOR_DELIVERY:  '🏃 Out for Delivery — DeliveryTracker',
-  DELIVERED:         '🎉 Package Delivered! — DeliveryTracker',
-  FAILED:            '⚠️ Delivery Attempt Failed — DeliveryTracker',
-  RESCHEDULED:       '📅 Delivery Rescheduled — DeliveryTracker',
+  PENDING:          '📦 Order Placed — DeliveryTracker',
+  ASSIGNED:         '🚴 Delivery Agent Assigned — DeliveryTracker',
+  PICKED_UP:        '✅ Package Picked Up — DeliveryTracker',
+  IN_TRANSIT:       '🚚 Package In Transit — DeliveryTracker',
+  OUT_FOR_DELIVERY: '🏃 Out for Delivery — DeliveryTracker',
+  DELIVERED:        '🎉 Package Delivered! — DeliveryTracker',
+  FAILED:           '⚠️ Delivery Attempt Failed — DeliveryTracker',
+  RESCHEDULED:      '📅 Delivery Rescheduled — DeliveryTracker',
 }
 
 const STATUS_ICONS: Record<OrderStatus, string> = {
@@ -42,32 +60,24 @@ const STATUS_ICONS: Record<OrderStatus, string> = {
   RESCHEDULED:      '📅',
 }
 
+// ── HTML builder ──────────────────────────────────────────────────────────────
 function buildEmailHtml(payload: NotificationPayload): string {
-  const shortId = payload.orderId.slice(-8).toUpperCase()
+  const shortId    = payload.orderId.slice(-8).toUpperCase()
   const statusLabel = payload.status.replace(/_/g, ' ')
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const appUrl     = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const isFailure  = payload.status === 'FAILED'
+  const badgeColor = isFailure ? '#ef4444' : '#D4A017'
 
   const statusMessages: Record<OrderStatus, string> = {
-    PENDING:
-      `Your order <strong>#${shortId}</strong> has been placed successfully. Our team will assign a delivery agent shortly.`,
-    ASSIGNED:
-      `Great news! A delivery agent${payload.agentName ? ` <strong>${payload.agentName}</strong>` : ''} has been assigned to your order <strong>#${shortId}</strong> and will pick up your package soon.`,
-    PICKED_UP:
-      `Your package for order <strong>#${shortId}</strong> has been picked up and is now with the delivery agent.`,
-    IN_TRANSIT:
-      `Your package for order <strong>#${shortId}</strong> is currently in transit and on its way to the delivery location.`,
-    OUT_FOR_DELIVERY:
-      `Your package for order <strong>#${shortId}</strong> is out for delivery! Expect it within the next few hours.`,
-    DELIVERED:
-      `Your package for order <strong>#${shortId}</strong> has been successfully delivered. Thank you for trusting DeliveryTracker!`,
-    FAILED:
-      `We were unable to deliver your package for order <strong>#${shortId}</strong>. ${payload.notes ? `<br>Reason: ${payload.notes}` : ''} Please reschedule your delivery.`,
-    RESCHEDULED:
-      `Your delivery for order <strong>#${shortId}</strong> has been rescheduled${payload.scheduledDate ? ` for <strong>${payload.scheduledDate.toLocaleDateString('en-IN')}</strong>` : ''}. We will assign a new agent shortly.`,
+    PENDING:          `Your order <strong>#${shortId}</strong> has been placed successfully. Our team will assign a delivery agent shortly.`,
+    ASSIGNED:         `Great news! A delivery agent${payload.agentName ? ` <strong>${payload.agentName}</strong>` : ''} has been assigned to your order <strong>#${shortId}</strong> and will pick up your package soon.`,
+    PICKED_UP:        `Your package for order <strong>#${shortId}</strong> has been picked up and is now with the delivery agent.`,
+    IN_TRANSIT:       `Your package for order <strong>#${shortId}</strong> is currently in transit and on its way to the delivery location.`,
+    OUT_FOR_DELIVERY: `Your package for order <strong>#${shortId}</strong> is out for delivery! Expect it within the next few hours.`,
+    DELIVERED:        `Your package for order <strong>#${shortId}</strong> has been successfully delivered. Thank you for trusting DeliveryTracker!`,
+    FAILED:           `We were unable to deliver your package for order <strong>#${shortId}</strong>.${payload.notes ? ` Reason: ${payload.notes}` : ''} Please reschedule your delivery.`,
+    RESCHEDULED:      `Your delivery for order <strong>#${shortId}</strong> has been rescheduled${payload.scheduledDate ? ` for <strong>${new Date(payload.scheduledDate).toLocaleDateString('en-IN')}</strong>` : ''}. We will assign a new agent shortly.`,
   }
-
-  const isFailure = payload.status === 'FAILED'
-  const badgeColor = isFailure ? '#ef4444' : '#D4A017'
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -83,9 +93,7 @@ function buildEmailHtml(payload: NotificationPayload): string {
 
   <!-- Header -->
   <tr><td style="background:linear-gradient(135deg,#1a1400 0%,#0f0f0f 100%);border:1px solid #D4A017;border-bottom:none;border-radius:16px 16px 0 0;padding:32px 40px;text-align:center;">
-    <div style="display:inline-block;background:linear-gradient(135deg,#D4A017,#F0C040);-webkit-background-clip:text;color:#D4A017;font-size:28px;font-weight:800;letter-spacing:-0.5px;">
-      🚚 DeliveryTracker
-    </div>
+    <div style="color:#D4A017;font-size:28px;font-weight:800;letter-spacing:-0.5px;">🚚 DeliveryTracker</div>
     <p style="color:#9a8060;margin:6px 0 0;font-size:13px;letter-spacing:0.5px;">LAST-MILE DELIVERY PLATFORM</p>
   </td></tr>
 
@@ -98,13 +106,11 @@ function buildEmailHtml(payload: NotificationPayload): string {
 
   <!-- Main Content -->
   <tr><td style="background:#111111;border-left:1px solid #D4A017;border-right:1px solid #D4A017;padding:8px 40px 32px;">
-    
-    <!-- Greeting -->
     <p style="color:#e8d5a3;font-size:16px;margin:0 0 8px;">Hi <strong>${payload.customerName}</strong>,</p>
     <p style="color:#b8a070;font-size:15px;line-height:1.7;margin:0 0 28px;">${statusMessages[payload.status]}</p>
 
-    <!-- Order Details Card -->
-    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" 
+    <!-- Order Details -->
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
            style="background:#1a1400;border:1px solid #2d2000;border-radius:12px;margin-bottom:28px;">
       <tr><td style="padding:16px 20px;border-bottom:1px solid #2d2000;">
         <span style="color:#6b5a3a;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">Order Details</span>
@@ -131,35 +137,23 @@ function buildEmailHtml(payload: NotificationPayload): string {
             <td style="color:#6b5a3a;font-size:13px;padding:5px 0;">Total Charge</td>
             <td align="right" style="color:#D4A017;font-weight:700;font-size:15px;">₹${payload.totalCharge}</td>
           </tr>` : ''}
-          ${payload.scheduledDate ? `<tr>
-            <td style="color:#6b5a3a;font-size:13px;padding:5px 0;">Scheduled Date</td>
-            <td align="right" style="color:#c8b080;font-size:13px;">${new Date(payload.scheduledDate).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
-          </tr>` : ''}
         </table>
       </td></tr>
     </table>
 
-    <!-- CTA Button -->
-    <div style="text-align:center;margin-bottom:8px;">
-      <a href="${appUrl}" 
-         style="display:inline-block;background:linear-gradient(135deg,#D4A017,#F0C040);color:#080808;text-decoration:none;padding:14px 36px;border-radius:8px;font-weight:700;font-size:15px;letter-spacing:0.3px;">
+    <!-- CTA -->
+    <div style="text-align:center;">
+      <a href="${appUrl}"
+         style="display:inline-block;background:linear-gradient(135deg,#D4A017,#F0C040);color:#080808;text-decoration:none;padding:14px 36px;border-radius:8px;font-weight:700;font-size:15px;">
         Track Your Order →
       </a>
     </div>
-    ${isFailure ? `<div style="text-align:center;margin-top:12px;">
-      <a href="${appUrl}" style="color:#D4A017;font-size:13px;text-decoration:underline;">Reschedule Delivery</a>
-    </div>` : ''}
-
   </td></tr>
 
   <!-- Footer -->
   <tr><td style="background:#0f0f0f;border:1px solid #D4A017;border-top:none;border-radius:0 0 16px 16px;padding:20px 40px;text-align:center;">
-    <p style="color:#3a3020;margin:0;font-size:12px;">
-      Sent by DeliveryTracker Admin &bull; This is an automated notification
-    </p>
-    <p style="color:#3a3020;margin:6px 0 0;font-size:11px;">
-      © ${new Date().getFullYear()} DeliveryTracker. All rights reserved.
-    </p>
+    <p style="color:#3a3020;margin:0;font-size:12px;">Sent by DeliveryTracker Admin · This is an automated notification</p>
+    <p style="color:#3a3020;margin:6px 0 0;font-size:11px;">© ${new Date().getFullYear()} DeliveryTracker. All rights reserved.</p>
   </td></tr>
 
 </table>
@@ -169,71 +163,80 @@ function buildEmailHtml(payload: NotificationPayload): string {
 </html>`
 }
 
+// ── Core send function ────────────────────────────────────────────────────────
 export async function sendStatusNotification(payload: NotificationPayload): Promise<boolean> {
-  try {
-    const subject = STATUS_SUBJECTS[payload.status]
-    const html = buildEmailHtml(payload)
+  const subject = STATUS_SUBJECTS[payload.status]
+  const html    = buildEmailHtml(payload)
 
-    // Log notification to DB (userId must be the customer's User.id)
-    const notification = await prisma.notification.create({
-      data: {
-        userId: payload.customerId,
-        orderId: payload.orderId,
-        subject,
-        message: `Status updated to ${payload.status}`,
-        type: 'EMAIL',
-      },
+  // Log to DB first
+  const notification = await prisma.notification.create({
+    data: {
+      userId:  payload.customerId,
+      orderId: payload.orderId,
+      subject,
+      message: `Status updated to ${payload.status}`,
+      type:    'EMAIL',
+    },
+  })
+
+  // If SMTP is not configured → mock log and mark sent
+  const smtpReady = !!(
+    process.env.SMTP_HOST &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS
+  )
+
+  if (!smtpReady) {
+    console.log(`[EMAIL MOCK] To: ${payload.to} | Subject: ${subject}`)
+    console.log('[EMAIL MOCK] Configure SMTP_HOST / SMTP_USER / SMTP_PASS in .env.local to send real emails.')
+    await prisma.notification.update({
+      where: { id: notification.id },
+      data:  { status: 'SENT', sentAt: new Date() },
     })
+    return true
+  }
 
-    // If no valid Resend key, mock the email
-    if (!process.env.RESEND_API_KEY || process.env.RESEND_API_KEY.includes('placeholder')) {
-      console.log(`[EMAIL MOCK] To: ${payload.to} | Subject: ${subject}`)
-      await prisma.notification.update({
-        where: { id: notification.id },
-        data: { status: 'SENT', sentAt: new Date() },
-      })
-      return true
-    }
+  try {
+    const transporter = getTransporter()
+    const fromName    = process.env.SMTP_FROM_NAME || 'DeliveryTracker'
+    const fromEmail   = process.env.SMTP_USER!
 
-    const { data, error } = await resend.emails.send({
-      from: `DeliveryTracker Admin <${FROM}>`,
-      to: payload.to,
+    const info = await transporter.sendMail({
+      from:    `"${fromName}" <${fromEmail}>`,
+      to:      payload.to,
       subject,
       html,
     })
 
-    if (error) {
-      console.error('[RESEND ERROR]', error)
-      await prisma.notification.update({
-        where: { id: notification.id },
-        data: { status: 'FAILED' },
-      })
-      return false
-    }
+    console.log(`[EMAIL SENT] messageId=${info.messageId} | to=${payload.to} | status=${payload.status}`)
 
-    console.log(`[EMAIL SENT] id=${data?.id} | to=${payload.to} | status=${payload.status}`)
     await prisma.notification.update({
       where: { id: notification.id },
-      data: { status: 'SENT', sentAt: new Date() },
+      data:  { status: 'SENT', sentAt: new Date() },
     })
     return true
-  } catch (error) {
-    console.error('[NOTIFICATION ERROR]', error)
+  } catch (err) {
+    console.error('[SMTP ERROR]', err)
+    await prisma.notification.update({
+      where: { id: notification.id },
+      data:  { status: 'FAILED' },
+    })
     return false
   }
 }
 
+// ── Public helper called by all order routes ──────────────────────────────────
 export async function notifyOrderStatusChange(
   orderId: string,
   status: OrderStatus,
-  notes?: string
+  notes?: string,
 ): Promise<void> {
   try {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: {
         customer: { select: { id: true, name: true, email: true } },
-        agent: { select: { name: true } },
+        agent:    { select: { name: true } },
       },
     })
 
@@ -243,19 +246,19 @@ export async function notifyOrderStatusChange(
     }
 
     await sendStatusNotification({
-      to: order.customer.email,
-      customerId: order.customer.id,   // ✅ correct: User.id, not orderId
+      to:           order.customer.email,
+      customerId:   order.customer.id,
       customerName: order.customer.name,
-      orderId: order.id,
+      orderId:      order.id,
       status,
       notes,
-      agentName: order.agent?.name,
+      agentName:    order.agent?.name,
       scheduledDate: order.scheduledDate,
-      totalCharge: order.totalCharge,
+      totalCharge:  order.totalCharge ?? undefined,
       pickupAddress: order.pickupAddress,
-      dropAddress: order.dropAddress,
+      dropAddress:  order.dropAddress,
     })
-  } catch (error) {
-    console.error('[notifyOrderStatusChange ERROR]', error)
+  } catch (err) {
+    console.error('[notifyOrderStatusChange ERROR]', err)
   }
 }
